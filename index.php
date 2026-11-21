@@ -2,10 +2,8 @@
 $page_title = 'Home';
 require_once 'includes/header.php';
 
-// Get categories
 $categories = db()->query("SELECT * FROM categories ORDER BY name")->fetchAll();
 
-// Featured / recent products
 $products = db()->query("SELECT p.*, c.name as category_name, c.icon as cat_icon 
     FROM products p 
     LEFT JOIN categories c ON p.category_id = c.id 
@@ -53,9 +51,11 @@ $user = current_user();
     <div class="product-grid">
         <?php foreach ($products as $p): ?>
             <div class="product-card">
-                <div class="product-img"><?= product_image_emoji($p['image']) ?></div>
+                <a href="product.php?id=<?= $p['id'] ?>">
+                    <div class="product-img"><?= product_image_emoji($p['image']) ?></div>
+                </a>
                 <div class="product-body">
-                    <div class="product-name"><?= e($p['name']) ?></div>
+                    <a href="product.php?id=<?= $p['id'] ?>"><div class="product-name"><?= e($p['name']) ?></div></a>
                     <div class="product-unit">per <?= e($p['unit']) ?></div>
                     <div class="price-row">
                         <span class="price-retail"><?= format_money($p['retail_price']) ?></span>
