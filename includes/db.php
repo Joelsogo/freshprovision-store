@@ -1,6 +1,9 @@
 <?php
 /**
- * SQLite Database Connection & Setup
+ * Database Connection & Setup
+ * Supports SQLite (local development) and PostgreSQL (Render / production)
+ *
+ * On Render: set the DATABASE_URL environment variable from the PostgreSQL service.
  */
 
 require_once __DIR__ . '/config.php';
@@ -8,17 +11,49 @@ require_once __DIR__ . '/config.php';
 class Database {
     private static $instance = null;
     private $pdo;
+    private $driver; // 'sqlite' or 'pgsql'
 
     private function __construct() {
         try {
-            $this->pdo = new PDO('sqlite:' . DB_PATH);
+            $databaseUrl = getenv('DATABASE_URL') ?: ($_ENV['DATABASE_URL'] ?? null);
+
+            if ($databaseUrl && str_starts_with($databaseUrl, 'postgres')) {
+                // PostgreSQL (Render)
+                $this->driver = 'pgsql';
+                $this->pdo = $this->connectPostgres($databaseUrl);
+            } else {
+                // SQLite (local)
+                $this->driver = 'sqlite';
+                $this->pdo = new PDO('sqlite:' . DB_PATH);
+                $this->pdo->exec('PRAGMA foreign_keys = ON');
+            }
+
             $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-            $this->pdo->exec('PRAGMA foreign_keys = ON');
+
             $this->initSchema();
         } catch (PDOException $e) {
             die('Database connection failed: ' . $e->getMessage());
         }
+    }
+
+    private function connectPostgres(string $url): PDO {
+        // Render DATABASE_URL looks like:
+        // postgres://user:pass@host:5432/dbname
+        $url = preg_replace('#^postgres(ql)?://#', 'pgsql://', $url);
+        $parts = parse_url($url);
+
+        $host = $parts['host'] ?? 'localhost';
+        $port = $parts['port'] ?? 5432;
+        $user = $parts['user'] ?? '';
+        $pass = $parts['pass'] ?? '';
+        $dbname = ltrim($parts['path'] ?? '', '/');
+
+        $dsn = "pgsql:host={$host};port={$port};dbname={$dbname};sslmode=require";
+
+        return new PDO($dsn, $user, $pass, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        ]);
     }
 
     public static function getInstance() {
@@ -32,8 +67,25 @@ class Database {
         return $this->pdo;
     }
 
+    public function getDriver() {
+        return $this->driver;
+    }
+
     private function initSchema() {
-        // Users
+        if ($this->driver === 'pgsql') {
+            $this->initPostgresSchema();
+        } else {
+            $this->initSqliteSchema();
+        }
+
+        // Seed only if empty
+        $count = $this->pdo->query("SELECT COUNT(*) FROM categories")->fetchColumn();
+        if ((int)$count === 0) {
+            $this->seedData();
+        }
+    }
+
+    private function initSqliteSchema() {
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +99,6 @@ class Database {
             )
         ");
 
-        // Categories
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS categories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +108,6 @@ class Database {
             )
         ");
 
-        // Products
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,7 +126,6 @@ class Database {
             )
         ");
 
-        // Orders
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,7 +146,6 @@ class Database {
             )
         ");
 
-        // Order Items
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS order_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,26 +159,89 @@ class Database {
                 FOREIGN KEY (product_id) REFERENCES products(id)
             )
         ");
+    }
 
-        // Seed if empty
-        $count = $this->pdo->query("SELECT COUNT(*) FROM categories")->fetchColumn();
-        if ($count == 0) {
-            $this->seedData();
-        }
+    private function initPostgresSchema() {
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                phone TEXT,
+                password TEXT NOT NULL,
+                role TEXT DEFAULT 'customer' CHECK(role IN ('customer', 'admin')),
+                customer_type TEXT DEFAULT 'retail' CHECK(customer_type IN ('retail', 'wholesale')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS categories (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                slug TEXT NOT NULL UNIQUE,
+                icon TEXT DEFAULT '🛒'
+            )
+        ");
+
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS products (
+                id SERIAL PRIMARY KEY,
+                category_id INTEGER REFERENCES categories(id),
+                name TEXT NOT NULL,
+                description TEXT,
+                unit TEXT DEFAULT 'unit',
+                retail_price NUMERIC(12,2) NOT NULL,
+                wholesale_price NUMERIC(12,2) NOT NULL,
+                wholesale_min_qty INTEGER DEFAULT 10,
+                stock INTEGER DEFAULT 0,
+                image TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS orders (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id),
+                order_number TEXT UNIQUE,
+                customer_name TEXT,
+                customer_phone TEXT,
+                customer_email TEXT,
+                shipping_address TEXT,
+                order_type TEXT DEFAULT 'retail' CHECK(order_type IN ('retail', 'wholesale')),
+                subtotal NUMERIC(12,2) NOT NULL,
+                total NUMERIC(12,2) NOT NULL,
+                status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled')),
+                payment_method TEXT DEFAULT 'cash_on_delivery',
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS order_items (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+                product_id INTEGER NOT NULL REFERENCES products(id),
+                product_name TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                unit_price NUMERIC(12,2) NOT NULL,
+                total_price NUMERIC(12,2) NOT NULL
+            )
+        ");
     }
 
     private function seedData() {
-        // Admin user (password: admin123)
         $adminPass = password_hash('admin123', PASSWORD_DEFAULT);
         $this->pdo->exec("INSERT INTO users (name, email, phone, password, role, customer_type) 
             VALUES ('Store Admin', 'admin@freshprovision.ng', '08012345678', '$adminPass', 'admin', 'wholesale')");
 
-        // Demo customer (password: customer123)
         $custPass = password_hash('customer123', PASSWORD_DEFAULT);
         $this->pdo->exec("INSERT INTO users (name, email, phone, password, role, customer_type) 
             VALUES ('Demo Customer', 'customer@example.com', '08098765432', '$custPass', 'customer', 'retail')");
 
-        // Categories
         $categories = [
             ['Grains & Cereals', 'grains', '🌾'],
             ['Oils & Fats', 'oils', '🫒'],
@@ -146,7 +257,6 @@ class Database {
             $stmt->execute($cat);
         }
 
-        // Products (Nigerian provision store style)
         $products = [
             [1, 'Premium Rice (50kg)', 'High quality long grain rice, perfect for wholesale', 'bag', 45000, 42000, 5, 120, 'rice'],
             [1, 'Rice (5kg)', 'Family size premium rice', 'bag', 5500, 5000, 10, 200, 'rice'],

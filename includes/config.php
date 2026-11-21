@@ -1,17 +1,16 @@
 <?php
 /**
  * Provision Store E-Commerce - Configuration
- * Pure PHP + SQLite | Wholesale & Retail
+ * Supports SQLite (local) and PostgreSQL (Render / production)
  */
 
-// Error reporting (disable in production)
+// Error reporting (set to 0 in true production if you want)
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 // Paths
 define('ROOT_PATH', dirname(__DIR__));
-// SQLite database path (make sure the data/ folder is writable on your host)
-define('DB_PATH', ROOT_PATH . '/data/store.db');
+define('DB_PATH', ROOT_PATH . '/data/store.db'); // used only for SQLite
 
 // Base URL for assets/links (handles /admin/ subdirectory)
 $script_dir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? ''));
@@ -31,7 +30,7 @@ if (session_status() === PHP_SESSION_NONE) {
 // Timezone
 date_default_timezone_set('Africa/Lagos');
 
-// Ensure data directory exists
+// Ensure data directory exists (for SQLite)
 if (!is_dir(ROOT_PATH . '/data')) {
-    mkdir(ROOT_PATH . '/data', 0755, true);
+    @mkdir(ROOT_PATH . '/data', 0755, true);
 }
