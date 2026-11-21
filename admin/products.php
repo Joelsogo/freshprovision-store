@@ -1,11 +1,11 @@
 <?php
 require_once '../includes/functions.php';
 require_admin();
-$page_title = 'Manage Products';
+$page_title = 'Manage Products & Stock';
 
-// Handle actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
+
     if ($action === 'add' || $action === 'edit') {
         $id = (int)($_POST['id'] ?? 0);
         $data = [
@@ -22,20 +22,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'add') {
             $stmt = db()->prepare("INSERT INTO products (name, description, category_id, unit, retail_price, wholesale_price, wholesale_min_qty, stock, image) VALUES (?,?,?,?,?,?,?,?,?)");
             $stmt->execute($data);
-            flash('Product added');
+            flash('Product added successfully');
         } else {
             $data[] = $id;
             $stmt = db()->prepare("UPDATE products SET name=?, description=?, category_id=?, unit=?, retail_price=?, wholesale_price=?, wholesale_min_qty=?, stock=?, image=? WHERE id=?");
             $stmt->execute($data);
-            flash('Product updated');
+            flash('Product updated successfully');
         }
         redirect('products.php');
-    } elseif ($action === 'toggle') {
+    }
+
+    if ($action === 'adjust_stock') {
+        $id = (int)$_POST['id'];
+        $adjustment = (int)$_POST['adjustment'];
+        $stmt = db()->prepare("SELECT stock FROM products WHERE id = ?");
+        $stmt->execute([$id]);
+        $current = (int)$stmt->fetchColumn();
+        $newStock = max(0, $current + $adjustment);
+        db()->prepare("UPDATE products SET stock = ? WHERE id = ?")->execute([$newStock, $id]);
+        flash('Stock updated to ' . $newStock);
+        redirect('products.php');
+    }
+
+    if ($action === 'set_stock') {
+        $id = (int)$_POST['id'];
+        $stock = max(0, (int)$_POST['stock']);
+        db()->prepare("UPDATE products SET stock = ? WHERE id = ?")->execute([$stock, $id]);
+        flash('Stock set to ' . $stock);
+        redirect('products.php');
+    }
+
+    if ($action === 'toggle') {
         $id = (int)$_POST['id'];
         db()->prepare("UPDATE products SET is_active = 1 - is_active WHERE id = ?")->execute([$id]);
         flash('Product status updated');
         redirect('products.php');
-    } elseif ($action === 'delete') {
+    }
+
+    if ($action === 'delete') {
         $id = (int)$_POST['id'];
         db()->prepare("DELETE FROM products WHERE id = ?")->execute([$id]);
         flash('Product deleted');
@@ -43,8 +67,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$products = db()->query("SELECT p.*, c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id = c.id ORDER BY p.name")->fetchAll();
+$products = db()->query("SELECT p.*, c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id = c.id ORDER BY p.stock ASC, p.name")->fetchAll();
 $categories = db()->query("SELECT * FROM categories ORDER BY name")->fetchAll();
+$low_stock_count = 0;
+foreach ($products as $p) {
+    if ($p['stock'] < 15 && $p['is_active']) $low_stock_count++;
+}
 $edit = null;
 if (isset($_GET['edit'])) {
     $stmt = db()->prepare("SELECT * FROM products WHERE id = ?");
@@ -56,18 +84,24 @@ require_once '../includes/header.php';
 ?>
 
 <div class="section-title">
-    <span>Products</span>
+    <span>Products & Stock</span>
     <a href="index.php" style="font-size:13px;color:var(--primary)">← Dashboard</a>
 </div>
 
+<?php if ($low_stock_count > 0): ?>
+<div class="flash flash-error" style="margin-bottom:16px">
+    <strong>⚠️ Low Stock Alert:</strong> <?= $low_stock_count ?> product(s) have less than 15 units left.
+</div>
+<?php endif; ?>
+
 <div class="auth-card" style="max-width:100%;margin-bottom:20px">
-    <h3 style="margin-bottom:14px"><?= $edit ? 'Edit Product' : 'Add New Product' ?></h3>
+    <h3 style="margin-bottom:14px"><?= $edit ? '✏️ Edit Product' : '➕ Add New Product' ?></h3>
     <form method="POST">
         <input type="hidden" name="action" value="<?= $edit ? 'edit' : 'add' ?>">
         <?php if ($edit): ?><input type="hidden" name="id" value="<?= $edit['id'] ?>"><?php endif; ?>
         
         <div class="form-group">
-            <label>Name</label>
+            <label>Product Name *</label>
             <input type="text" name="name" class="form-control" required value="<?= e($edit['name'] ?? '') ?>">
         </div>
         <div class="form-group">
@@ -84,19 +118,19 @@ require_once '../includes/header.php';
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
             <div class="form-group">
-                <label>Unit</label>
+                <label>Unit (bag, carton...)</label>
                 <input type="text" name="unit" class="form-control" value="<?= e($edit['unit'] ?? 'unit') ?>">
             </div>
             <div class="form-group">
-                <label>Stock</label>
-                <input type="number" name="stock" class="form-control" value="<?= e($edit['stock'] ?? 0) ?>">
+                <label>Stock Quantity *</label>
+                <input type="number" name="stock" class="form-control" min="0" value="<?= e($edit['stock'] ?? 0) ?>" required>
             </div>
             <div class="form-group">
-                <label>Retail Price (₦)</label>
+                <label>Retail Price (₦) *</label>
                 <input type="number" step="0.01" name="retail_price" class="form-control" required value="<?= e($edit['retail_price'] ?? '') ?>">
             </div>
             <div class="form-group">
-                <label>Wholesale Price (₦)</label>
+                <label>Wholesale Price (₦) *</label>
                 <input type="number" step="0.01" name="wholesale_price" class="form-control" required value="<?= e($edit['wholesale_price'] ?? '') ?>">
             </div>
             <div class="form-group">
@@ -105,36 +139,71 @@ require_once '../includes/header.php';
             </div>
             <div class="form-group">
                 <label>Image Key</label>
-                <input type="text" name="image" class="form-control" value="<?= e($edit['image'] ?? 'product') ?>" placeholder="rice, oil, etc">
+                <input type="text" name="image" class="form-control" value="<?= e($edit['image'] ?? 'product') ?>" placeholder="rice, oil, noodles...">
             </div>
         </div>
-        <button type="submit" class="btn btn-primary btn-block"><?= $edit ? 'Update' : 'Add Product' ?></button>
+        <button type="submit" class="btn btn-primary btn-block"><?= $edit ? 'Update Product' : 'Add Product' ?></button>
         <?php if ($edit): ?>
-            <a href="products.php" class="btn btn-outline btn-block mt-2">Cancel</a>
+            <a href="products.php" class="btn btn-outline btn-block mt-2">Cancel Edit</a>
         <?php endif; ?>
     </form>
 </div>
 
-<?php foreach ($products as $p): ?>
-    <div class="order-card">
+<div class="section-title"><span>All Products (<?= count($products) ?>)</span></div>
+
+<?php foreach ($products as $p): 
+    $is_low = $p['stock'] < 15;
+?>
+    <div class="order-card" style="<?= $is_low ? 'border-left:4px solid var(--danger)' : '' ?>">
         <div class="order-header">
             <div>
-                <div class="order-number"><?= product_image_emoji($p['image']) ?> <?= e($p['name']) ?></div>
-                <div class="order-date"><?= e($p['cat_name']) ?> · Stock: <?= $p['stock'] ?> · <?= $p['is_active'] ? 'Active' : 'Hidden' ?></div>
+                <div class="order-number">
+                    <?= product_image_emoji($p['image']) ?> <?= e($p['name']) ?>
+                    <?php if (!$p['is_active']): ?> <span class="status status-cancelled">Hidden</span><?php endif; ?>
+                </div>
+                <div class="order-date"><?= e($p['cat_name']) ?> · per <?= e($p['unit']) ?></div>
+            </div>
+            <div style="text-align:right">
+                <div style="font-size:20px;font-weight:700;color:<?= $is_low ? 'var(--danger)' : 'var(--primary)' ?>">
+                    <?= $p['stock'] ?>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted)">in stock</div>
             </div>
         </div>
-        <div style="font-size:13px;margin-bottom:10px">
+
+        <div style="font-size:13px;margin-bottom:12px">
             Retail: <strong><?= format_money($p['retail_price']) ?></strong> · 
-            Wholesale: <strong><?= format_money($p['wholesale_price']) ?></strong> (min <?= $p['wholesale_min_qty'] ?>)
+            Wholesale: <strong><?= format_money($p['wholesale_price']) ?></strong>
+            (min <?= $p['wholesale_min_qty'] ?>)
         </div>
+
+        <div style="background:#f8fafc;padding:10px;border-radius:8px;margin-bottom:10px">
+            <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-muted)">Quick Stock Adjust</div>
+            <form method="POST" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                <input type="hidden" name="action" value="adjust_stock">
+                <input type="hidden" name="id" value="<?= $p['id'] ?>">
+                <button type="submit" name="adjustment" value="-10" class="btn btn-sm btn-outline">−10</button>
+                <button type="submit" name="adjustment" value="-1" class="btn btn-sm btn-outline">−1</button>
+                <button type="submit" name="adjustment" value="1" class="btn btn-sm btn-outline">+1</button>
+                <button type="submit" name="adjustment" value="10" class="btn btn-sm btn-outline">+10</button>
+                <button type="submit" name="adjustment" value="50" class="btn btn-sm btn-outline">+50</button>
+            </form>
+            <form method="POST" style="display:flex;gap:6px;align-items:center;margin-top:8px">
+                <input type="hidden" name="action" value="set_stock">
+                <input type="hidden" name="id" value="<?= $p['id'] ?>">
+                <input type="number" name="stock" class="form-control" style="width:90px;padding:6px 10px" value="<?= $p['stock'] ?>" min="0">
+                <button type="submit" class="btn btn-sm btn-primary">Set Exact</button>
+            </form>
+        </div>
+
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <a href="?edit=<?= $p['id'] ?>" class="btn btn-sm btn-outline">Edit</a>
+            <a href="?edit=<?= $p['id'] ?>" class="btn btn-sm btn-outline">Edit Full</a>
             <form method="POST" style="display:inline">
                 <input type="hidden" name="action" value="toggle">
                 <input type="hidden" name="id" value="<?= $p['id'] ?>">
                 <button type="submit" class="btn btn-sm btn-outline"><?= $p['is_active'] ? 'Hide' : 'Show' ?></button>
             </form>
-            <form method="POST" style="display:inline" onsubmit="return confirm('Delete this product?')">
+            <form method="POST" style="display:inline" onsubmit="return confirm('Delete this product permanently?')">
                 <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="id" value="<?= $p['id'] ?>">
                 <button type="submit" class="btn btn-sm btn-danger">Delete</button>
