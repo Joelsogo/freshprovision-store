@@ -4,7 +4,6 @@ require_admin();
 
 $page_title = 'Admin Dashboard';
 
-// Stats
 $stats = [
     'products' => db()->query("SELECT COUNT(*) FROM products")->fetchColumn(),
     'orders' => db()->query("SELECT COUNT(*) FROM orders")->fetchColumn(),
@@ -43,8 +42,9 @@ require_once '../includes/header.php';
 </div>
 
 <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
-    <a href="products.php" class="btn btn-primary btn-sm"><i class="fas fa-box"></i> Manage Products</a>
-    <a href="orders.php" class="btn btn-outline btn-sm"><i class="fas fa-receipt"></i> Manage Orders</a>
+    <a href="products.php" class="btn btn-primary btn-sm"><i class="fas fa-box"></i> Products & Stock</a>
+    <a href="orders.php" class="btn btn-outline btn-sm"><i class="fas fa-receipt"></i> Orders</a>
+    <a href="settings.php" class="btn btn-outline btn-sm"><i class="fas fa-cog"></i> Settings</a>
 </div>
 
 <div class="section-title"><span>Recent Orders</span></div>

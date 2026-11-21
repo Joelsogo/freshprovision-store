@@ -27,6 +27,15 @@
         </a>
     </nav>
 
+    <?php
+    $wa = function_exists('whatsapp_link') ? whatsapp_link() : null;
+    if ($wa):
+    ?>
+    <a href="<?= e($wa) ?>" class="whatsapp-float" target="_blank" rel="noopener" title="Chat on WhatsApp">
+        <i class="fab fa-whatsapp"></i>
+    </a>
+    <?php endif; ?>
+
     <script src="<?= BASE_URL ?>assets/js/app.js"></script>
 </body>
 </html>
