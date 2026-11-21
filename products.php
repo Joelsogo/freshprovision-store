@@ -10,7 +10,6 @@ $type = $_GET['type'] ?? null;
 if ($type && is_logged_in() && in_array($type, ['retail', 'wholesale'])) {
     $stmt = db()->prepare("UPDATE users SET customer_type = ? WHERE id = ?");
     $stmt->execute([$type, $_SESSION['user_id']]);
-    // Refresh user
     unset($GLOBALS['user']);
 }
 
@@ -29,7 +28,15 @@ if ($search) {
     $params[] = "%$search%";
     $params[] = "%$search%";
 }
-$sql .= " ORDER BY p.name ASC";
+$sort = $_GET['sort'] ?? 'name';
+$order_map = [
+    'name' => 'p.name ASC',
+    'price_low' => 'p.retail_price ASC',
+    'price_high' => 'p.retail_price DESC',
+    'newest' => 'p.id DESC',
+];
+$order_by = $order_map[$sort] ?? 'p.name ASC';
+$sql .= " ORDER BY $order_by";
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
@@ -65,6 +72,15 @@ $user = current_user();
     <?php endforeach; ?>
 </div>
 
+<!-- Sort -->
+<div class="sort-bar">
+    <span style="padding:8px 0;font-size:12px;color:var(--text-muted)">Sort:</span>
+    <a href="?<?= http_build_query(array_merge($_GET, ['sort' => 'name'])) ?>" class="<?= ($sort ?? 'name') === 'name' ? 'active' : '' ?>">Name</a>
+    <a href="?<?= http_build_query(array_merge($_GET, ['sort' => 'price_low'])) ?>" class="<?= ($sort ?? '') === 'price_low' ? 'active' : '' ?>">Price ↑</a>
+    <a href="?<?= http_build_query(array_merge($_GET, ['sort' => 'price_high'])) ?>" class="<?= ($sort ?? '') === 'price_high' ? 'active' : '' ?>">Price ↓</a>
+    <a href="?<?= http_build_query(array_merge($_GET, ['sort' => 'newest'])) ?>" class="<?= ($sort ?? '') === 'newest' ? 'active' : '' ?>">Newest</a>
+</div>
+
 <?php if (empty($products)): ?>
     <div class="empty-state">
         <i class="fas fa-search"></i>
@@ -74,14 +90,15 @@ $user = current_user();
     </div>
 <?php else: ?>
     <div class="product-grid">
-        <?php foreach ($products as $p): 
-            $display_price = get_product_price($p, 1);
-            $is_wholesale_eligible = $user && $user['customer_type'] === 'wholesale';
-        ?>
+        <?php foreach ($products as $p): ?>
             <div class="product-card">
-                <div class="product-img"><?= product_image_emoji($p['image']) ?></div>
+                <a href="product.php?id=<?= $p['id'] ?>">
+                    <div class="product-img"><?= product_image_emoji($p['image']) ?></div>
+                </a>
                 <div class="product-body">
-                    <div class="product-name"><?= e($p['name']) ?></div>
+                    <a href="product.php?id=<?= $p['id'] ?>">
+                        <div class="product-name"><?= e($p['name']) ?></div>
+                    </a>
                     <div class="product-unit">per <?= e($p['unit']) ?> · Stock: <?= $p['stock'] ?></div>
                     <div class="price-row">
                         <span class="price-retail"><?= format_money($p['retail_price']) ?></span>
