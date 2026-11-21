@@ -1,20 +1,23 @@
 FROM php:8.3-cli
 
-# Install PostgreSQL PDO extension
+# Install system deps + GD + PostgreSQL
 RUN apt-get update && apt-get install -y \
     libpq-dev \
-    && docker-php-ext-install pdo pdo_pgsql \
+    libpng-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
+    libwebp-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-install pdo pdo_pgsql gd \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy all application files
 COPY . .
 
-# Expose the port Render will use
+# Ensure uploads directory is writable
+RUN mkdir -p uploads/products && chmod -R 775 uploads
+
 EXPOSE 10000
 
-# Start the PHP built-in server
-# Render injects the $PORT environment variable
 CMD ["sh", "-c", "php -S 0.0.0.0:${PORT:-10000}"]
